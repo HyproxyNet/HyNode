@@ -1,0 +1,17 @@
+panel:
+  url: "https://panel.example.com"
+  token: "your-server-token"
+
+nodes:
+  - id: "my-node-code"
+    enabled: true
+
+runtime:
+  data_dir: "/var/lib/hynode"
+  log_level: "info"
+  health_listen: "127.0.0.1:9090"
+
+sync: {}
+
+certificate_fallback:
+  cert_mode: "none"

@@ -1,0 +1,7 @@
+HyNode is licensed under the GNU General Public License, version 3 or later.
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+This project links with the local sing-box and mieru GPLv3 source trees.
+The complete license text is available at:
+https://www.gnu.org/licenses/gpl-3.0.txt

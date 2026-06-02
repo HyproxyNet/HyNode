@@ -1,0 +1,13 @@
+services:
+  hynode:
+    build: .
+    restart: unless-stopped
+    environment:
+      HYBOARD_TOKEN: "change-me"
+    volumes:
+      - ./config.example.yaml:/etc/hynode/config.yaml:ro
+      - hynode-data:/var/lib/hynode
+    network_mode: host
+
+volumes:
+  hynode-data:
