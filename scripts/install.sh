@@ -177,16 +177,10 @@ install_cli() {
 }
 
 main() {
-    echo -e "${CYAN}"
-    echo "  _   _       _   _  ______"
-    echo " | | | |     | \ | | |  _  \ "
-    echo " | |_| |_   _|  \| | | | | |___  _ __   ___  ___"
-    echo " |  _  | | | | . \` | | | | / _ \| '_ \ / _ \/ __|"
-    echo " | | | | |_| | |\  | | |/ / (_) | | | |  __/ (__ "
-    echo " \_| |_/\__, \_| \_/ |___/ \___/|_| |_|\___|\___|"
-    echo "         __/ |"
-    echo "        |___/"
-    echo -e "${PLAIN}"
+    echo ""
+    echo -e "${CYAN}HyNode Installer${PLAIN} - HyBoard 节点后端"
+    echo "============================================"
+    echo ""
 
     check_root
     detect_arch
@@ -204,10 +198,13 @@ main() {
     install_cli
 
     echo ""
-    ok "===== 安装完成 ====="
+    echo "============================================"
+    ok "安装完成！"
     echo ""
-    echo -e "  管理命令: ${CYAN}hynode-cli${PLAIN}"
-    echo -e "  配置文件: ${CYAN}${CONFIG_DIR}/config.yaml${PLAIN}"
+    echo "  管理命令:   hynode-cli"
+    echo "  配置文件:   ${CONFIG_DIR}/config.yaml"
+    echo "  启动服务:   systemctl start hynode"
+    echo "  查看日志:   hynode-cli log"
     echo ""
 
     if [[ "$first_install" == true ]] && [[ -f "${CONFIG_DIR}/config.yaml" ]]; then
