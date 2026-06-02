@@ -2,13 +2,11 @@
 # HyNode one-click installation script
 # Usage: bash <(curl -fsSL https://raw.githubusercontent.com/HyproxyNet/HyNode/main/scripts/install.sh)
 
-set -e
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-PLAIN='\033[0m'
+red='\033[0;31m'
+green='\033[0;32m'
+yellow='\033[0;33m'
+cyan='\033[0;36m'
+plain='\033[0m'
 
 REPO="HyproxyNet/HyNode"
 INSTALL_DIR="/usr/local/bin"
@@ -17,21 +15,25 @@ DATA_DIR="/var/lib/hynode"
 SERVICE_NAME="hynode"
 BINARY="${INSTALL_DIR}/hynode"
 
-ok()   { echo -e "${GREEN}[OK]${PLAIN} $*"; }
-warn() { echo -e "${YELLOW}[WARN]${PLAIN} $*"; }
-err()  { echo -e "${RED}[ERROR]${PLAIN} $*"; exit 1; }
-info() { echo -e "${CYAN}[INFO]${PLAIN} $*"; }
+ok()   { echo -e "${green}[OK]${plain} $*"; }
+warn() { echo -e "${yellow}[WARN]${plain} $*"; }
+err()  { echo -e "${red}[ERROR]${plain} $*"; }
+info() { echo -e "${cyan}[INFO]${plain} $*"; }
 
 check_root() {
-    [[ $EUID -ne 0 ]] && err "请以 root 用户运行此脚本"
+    if [[ $EUID -ne 0 ]]; then
+        err "请以 root 用户运行此脚本"
+        exit 1
+    fi
 }
 
 detect_arch() {
-    case "$(uname -m)" in
+    ARCH=$(uname -m)
+    case "$ARCH" in
         x86_64|amd64)  ARCH="amd64" ;;
         aarch64|arm64) ARCH="arm64" ;;
         armv7l)        ARCH="arm" ;;
-        *)             err "不支持的架构: $(uname -m)" ;;
+        *)             err "不支持的架构: $ARCH"; exit 1 ;;
     esac
     ok "架构: linux/${ARCH}"
 }
@@ -43,16 +45,18 @@ detect_os() {
         PKG_MGR="apt"
     else
         err "不支持的操作系统"
+        exit 1
     fi
+    ok "包管理器: ${PKG_MGR}"
 }
 
 install_deps() {
     info "安装系统依赖..."
     if [[ "$PKG_MGR" == "apt" ]]; then
         apt-get update -qq
-        apt-get install -y -qq wget curl ca-certificates >/dev/null 2>&1
+        apt-get install -y -qq wget curl ca-certificates 2>/dev/null
     else
-        yum install -y -q wget curl ca-certificates >/dev/null 2>&1
+        yum install -y -q wget curl ca-certificates 2>/dev/null
     fi
     ok "系统依赖已安装"
 }
@@ -60,17 +64,19 @@ install_deps() {
 get_latest_version() {
     local ver
     ver=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | grep -oP 'v[0-9.]+')
-    if [[ -z "$ver" ]]; then
-        err "获取版本号失败，请检查网络或手动指定版本"
-    fi
     echo "$ver"
 }
 
 install_binary() {
-    local version="${1:-}"
+    local version="$1"
     if [[ -z "$version" ]]; then
         info "获取最新版本..."
         version=$(get_latest_version)
+    fi
+    if [[ -z "$version" ]]; then
+        err "获取版本号失败"
+        err "请先在 GitHub 上创建 Release，或手动安装二进制到 ${BINARY}"
+        exit 1
     fi
     ok "版本: ${version}"
 
@@ -78,7 +84,10 @@ install_binary() {
     local url="https://github.com/${REPO}/releases/download/${version}/${filename}"
 
     info "下载 ${filename}..."
-    wget -q -O "/tmp/${filename}" "$url" || err "下载失败: ${url}"
+    if ! wget -q -O "/tmp/${filename}" "$url"; then
+        err "下载失败: ${url}"
+        exit 1
+    fi
 
     info "解压安装..."
     tar -xzf "/tmp/${filename}" -C /tmp/
@@ -108,7 +117,7 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    systemctl enable "${SERVICE_NAME}" >/dev/null 2>&1
+    systemctl enable "${SERVICE_NAME}" 2>/dev/null
     ok "systemd 服务已安装"
 }
 
@@ -119,12 +128,14 @@ generate_config() {
 
     read -rp "面板地址 (如 https://panel.example.com): " panel_url
     while [[ -z "$panel_url" ]]; do
-        err "面板地址不能为空" ; read -rp "面板地址: " panel_url
+        echo -e "${red}面板地址不能为空${plain}"
+        read -rp "面板地址: " panel_url
     done
 
     read -rp "面板 Token (server_token): " panel_token
     while [[ -z "$panel_token" ]]; do
-        err "Token 不能为空" ; read -rp "面板 Token: " panel_token
+        echo -e "${red}Token 不能为空${plain}"
+        read -rp "面板 Token: " panel_token
     done
 
     local node_ids=()
@@ -137,7 +148,10 @@ generate_config() {
         ok "  已添加: ${code}"
     done
 
-    [[ ${#node_ids[@]} -eq 0 ]] && err "至少需要一个节点"
+    if [[ ${#node_ids[@]} -eq 0 ]]; then
+        err "至少需要一个节点"
+        return 1
+    fi
 
     local nodes_yaml=""
     for id in "${node_ids[@]}"; do
@@ -169,16 +183,17 @@ EOF
 
 install_cli() {
     info "安装管理脚本..."
-    wget -q -O "/usr/bin/hynode-cli" \
-        "https://raw.githubusercontent.com/${REPO}/main/scripts/hynode.sh" || \
-        { warn "下载管理脚本失败，请手动下载"; return; }
-    chmod +x "/usr/bin/hynode-cli"
-    ok "管理脚本已安装: hynode-cli"
+    if wget -q -O "/usr/bin/hynode-cli" "https://raw.githubusercontent.com/${REPO}/main/scripts/hynode.sh"; then
+        chmod +x "/usr/bin/hynode-cli"
+        ok "管理脚本已安装: hynode-cli"
+    else
+        warn "下载管理脚本失败，请手动下载"
+    fi
 }
 
 main() {
     echo ""
-    echo -e "${CYAN}HyNode Installer${PLAIN} - HyBoard 节点后端"
+    echo -e "${cyan}HyNode Installer${plain} - HyBoard 节点后端"
     echo "============================================"
     echo ""
 
@@ -211,10 +226,15 @@ main() {
         read -rp "是否现在启动? [Y/n] " choice
         case "$choice" in
             n|N) info "稍后运行: systemctl start hynode" ;;
-            *)   systemctl start "${SERVICE_NAME}"
-                 sleep 1
-                 systemctl status "${SERVICE_NAME}" --no-pager -l 2>/dev/null || true
-                 ;;
+            *)
+                systemctl start "${SERVICE_NAME}"
+                sleep 2
+                if systemctl is-active --quiet "${SERVICE_NAME}"; then
+                    ok "HyNode 已启动"
+                else
+                    warn "启动失败，查看日志: journalctl -u hynode -e"
+                fi
+                ;;
         esac
     fi
 }
