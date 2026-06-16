@@ -9,7 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.7'
+
+      - name: Vet
+        run: go vet -tags "with_quic with_acme" ./...
+
+      - name: Test
+        run: go test -race -tags "with_quic with_acme" ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --build-tags "with_quic with_acme"
+
   build:
+    needs: ci
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -47,7 +69,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hynode-${{ matrix.suffix }}
-          path: hynode-${{ matrix.suffix }}.tar.gz
+          path: |
+            hynode-${{ matrix.suffix }}.tar.gz
+            hynode-${{ matrix.suffix }}.tar.gz.sha256
 
   release:
     needs: build
@@ -62,4 +86,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
