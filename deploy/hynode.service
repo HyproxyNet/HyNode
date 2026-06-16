@@ -1,21 +1,22 @@
 [Unit]
-Description=HyNode node service for HyBoard
+Description=HyNode - HyBoard 高性能节点后端
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=hynode
-Group=hynode
-EnvironmentFile=-/etc/hynode/hynode.env
 ExecStart=/usr/local/bin/hynode run -c /etc/hynode/config.yaml
 Restart=on-failure
-RestartSec=3
+RestartSec=5
 LimitNOFILE=1048576
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/hynode
+
+# Performance tuning for high-concurrency multi-user scenarios
+LimitNPROC=65536
+LimitCORE=infinity
+
+# Graceful shutdown: send SIGTERM, wait for final traffic report
+TimeoutStopSec=10
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

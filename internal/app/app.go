@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -71,26 +73,46 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) runNode(ctx context.Context, nodeID string) error {
 	var (
-		configETag string
-		usersETag  string
-		currentCfg *panel.NodeConfig
-		currentUsr []panel.User
-		usersReady bool
-		runtime    kernel.Runtime
-		nodeType   string
+		configETag  string
+		usersETag   string
+		currentCfg  *panel.NodeConfig
+		currentUsr  []panel.User
+		usersReady  bool
+		runtime     kernel.Runtime
+		nodeType    string
+		configDirty bool
+		usersDirty  bool
 	)
+
 	defer func() {
 		if runtime != nil {
 			_ = runtime.Close()
 		}
 	}()
 
+	// apply rebuilds the runtime. When only users changed and the runtime
+	// supports hot-reload, we avoid a full restart to prevent disconnections.
 	apply := func() error {
 		if currentCfg == nil || !usersReady {
 			return nil
 		}
 		nodeType = currentCfg.NodeType()
 		a.stats.ReplaceUsers(currentUsr)
+
+		// If only users changed (not config), try hot-reload on existing runtime.
+		if usersDirty && !configDirty && runtime != nil {
+			if hr, ok := runtime.(kernel.HotReloader); ok {
+				if err := hr.ReloadUsers(currentUsr); err != nil {
+					a.log.Warn("hot-reload users failed, falling back to full rebuild", "node", nodeID, "error", err)
+				} else {
+					a.log.Info("users hot-reloaded", "node", nodeID, "count", len(currentUsr))
+					usersDirty = false
+					return nil
+				}
+			}
+		}
+
+		// Full rebuild.
 		next, err := a.createRuntime(nodeID, *currentCfg, currentUsr)
 		if err != nil {
 			return err
@@ -104,9 +126,12 @@ func (a *App) runNode(ctx context.Context, nodeID string) error {
 			return err
 		}
 		runtime = next
+		configDirty = false
+		usersDirty = false
 		a.log.Info("node runtime applied", "node", nodeID, "protocol", currentCfg.Protocol, "users", len(currentUsr))
 		return nil
 	}
+
 	refresh := func() error {
 		changed := false
 		cfg, tag, update, err := a.client.Config(ctx, nodeID, nodeType, configETag)
@@ -115,7 +140,7 @@ func (a *App) runNode(ctx context.Context, nodeID string) error {
 		}
 		configETag = tag
 		if update {
-			currentCfg, changed = cfg, true
+			currentCfg, changed, configDirty = cfg, true, true
 			a.log.Info("config updated", "node", nodeID, "protocol", cfg.Protocol, "port", cfg.ServerPort)
 		}
 		users, tag, update, err := a.client.Users(ctx, nodeID, nodeType, usersETag)
@@ -124,7 +149,7 @@ func (a *App) runNode(ctx context.Context, nodeID string) error {
 		}
 		usersETag = tag
 		if update {
-			currentUsr, usersReady, changed = users.Users, true, true
+			currentUsr, usersReady, changed, usersDirty = users.Users, true, true, true
 			a.log.Info("users updated", "node", nodeID, "count", len(users.Users))
 		}
 		if changed {
@@ -132,6 +157,7 @@ func (a *App) runNode(ctx context.Context, nodeID string) error {
 		}
 		return nil
 	}
+
 	a.log.Info("connecting to panel", "node", nodeID, "url", a.config.Panel.URL)
 	if err := retry(ctx, a.log, nodeID, refresh); err != nil {
 		return err
@@ -176,8 +202,8 @@ func (a *App) doReport(ctx context.Context, nodeID, nodeType string) {
 		Traffic: snapshot.Traffic,
 		Alive:   snapshot.Alive,
 		Online:  snapshot.Online,
-		Status:  toMap(status),
-		Metrics: toMap(metr),
+		Status:  toMap(status, a.log, "status"),
+		Metrics: toMap(metr, a.log, "metrics"),
 	}
 	if err := a.client.Report(ctx, nodeID, nodeType, payload); err != nil {
 		a.log.Error("report node status", "node", nodeID, "error", err)
@@ -186,13 +212,17 @@ func (a *App) doReport(ctx context.Context, nodeID, nodeType string) {
 	a.stats.Commit(nodeID, snapshot)
 }
 
-func toMap(v any) map[string]any {
+func toMap(v any, log *slog.Logger, label string) map[string]any {
 	b, err := json.Marshal(v)
 	if err != nil {
+		log.Warn("marshal "+label+" failed", "error", err)
 		return nil
 	}
 	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	if err = json.Unmarshal(b, &m); err != nil {
+		log.Warn("unmarshal "+label+" failed", "error", err)
+		return nil
+	}
 	return m
 }
 
@@ -213,6 +243,13 @@ func (a *App) serveHealth(ctx context.Context) error {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	server := &http.Server{Addr: a.config.Runtime.HealthListen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+
+	// Start listener synchronously to detect bind errors early.
+	ln, err := net.Listen("tcp", a.config.Runtime.HealthListen)
+	if err != nil {
+		return fmt.Errorf("health server listen %s: %w", a.config.Runtime.HealthListen, err)
+	}
+
 	go func() {
 		<-ctx.Done()
 		stop, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -220,7 +257,7 @@ func (a *App) serveHealth(ctx context.Context) error {
 		_ = server.Shutdown(stop)
 	}()
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 			a.log.Error("health server stopped", "error", err)
 		}
 	}()
@@ -234,11 +271,14 @@ func retry(ctx context.Context, log *slog.Logger, nodeID string, action func() e
 		if err == nil {
 			return nil
 		}
-		log.Warn("panel request failed, retrying", "node", nodeID, "error", err, "retry_in", delay)
+		// Add jitter (0-25% of delay) to prevent thunder-herd after panel outage.
+		jitter := time.Duration(rand.Int63n(int64(delay) / 4))
+		nextDelay := delay + jitter
+		log.Warn("panel request failed, retrying", "node", nodeID, "error", err, "retry_in", nextDelay)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-time.After(nextDelay):
 		}
 		if delay < 30*time.Second {
 			delay *= 2

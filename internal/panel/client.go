@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -24,9 +25,16 @@ func NewClient(baseURL, token string) *Client {
 		http: &http.Client{
 			Timeout: 15 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        32,
-				MaxIdleConnsPerHost: 16,
-				IdleConnTimeout:     90 * time.Second,
+				MaxIdleConns:        128,
+				MaxIdleConnsPerHost: 64,
+				IdleConnTimeout:     180 * time.Second,
+				MaxConnsPerHost:     0, // unlimited
+				DisableCompression:  false,
+				ForceAttemptHTTP2:   true,
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
 			},
 		},
 	}

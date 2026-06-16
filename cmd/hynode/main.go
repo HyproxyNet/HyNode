@@ -21,8 +21,15 @@ var (
 )
 
 func main() {
+	// Handle --version before subcommand parsing.
+	if len(os.Args) >= 2 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("hynode %s (commit: %s, built: %s)\n", version, commit, buildTime)
+		os.Exit(0)
+	}
+
 	if len(os.Args) < 2 || os.Args[1] != "run" {
 		fmt.Fprintln(os.Stderr, "usage: hynode run [-c /etc/hynode/config.yaml]")
+		fmt.Fprintln(os.Stderr, "       hynode --version")
 		os.Exit(2)
 	}
 	flags := flag.NewFlagSet("run", flag.ExitOnError)

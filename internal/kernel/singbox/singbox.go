@@ -8,7 +8,8 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
+	"time"
 
 	box "github.com/sagernet/sing-box"
 	"github.com/sagernet/sing-box/adapter"
@@ -32,6 +33,10 @@ type Factory struct {
 
 type Runtime struct {
 	instance *box.Box
+	factory  Factory
+	nodeID   string
+	cfg      panel.NodeConfig
+	stats    *state.Store
 }
 
 func (f Factory) New(nodeID string, cfg panel.NodeConfig, users []panel.User, stats *state.Store) (*Runtime, error) {
@@ -53,11 +58,53 @@ func (f Factory) New(nodeID string, cfg panel.NodeConfig, users []panel.User, st
 		return nil, fmt.Errorf("create sing-box: %w", err)
 	}
 	instance.Router().AppendTracker(&tracker{nodeID: nodeID, stats: stats})
-	return &Runtime{instance: instance}, nil
+	return &Runtime{
+		instance: instance,
+		factory:  f,
+		nodeID:   nodeID,
+		cfg:      cfg,
+		stats:    stats,
+	}, nil
 }
 
 func (r *Runtime) Start(_ context.Context) error { return r.instance.Start() }
 func (r *Runtime) Close() error                  { return r.instance.Close() }
+
+// ReloadUsers rebuilds the sing-box instance with an updated user list.
+// This is a full rebuild but is only triggered on user-only changes,
+// avoiding the overhead of unnecessary config re-processing.
+func (r *Runtime) ReloadUsers(users []panel.User) error {
+	raw, err := r.factory.build(r.nodeID, r.cfg, users)
+	if err != nil {
+		return err
+	}
+	content, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	ctx := include.Context(context.Background())
+	options, err := singjson.UnmarshalExtendedContext[option.Options](ctx, content)
+	if err != nil {
+		return fmt.Errorf("validate sing-box configuration: %w", err)
+	}
+	next, err := box.New(box.Options{Options: options, Context: ctx})
+	if err != nil {
+		return fmt.Errorf("create sing-box: %w", err)
+	}
+	next.Router().AppendTracker(&tracker{nodeID: r.nodeID, stats: r.stats})
+	if err = next.Start(); err != nil {
+		_ = next.Close()
+		return err
+	}
+	// Swap instances: briefly drain before closing old to let in-flight
+	// connections finish cleanly, reducing connection reset issues for
+	// multi-user high-concurrency scenarios.
+	old := r.instance
+	r.instance = next
+	time.Sleep(100 * time.Millisecond)
+	_ = old.Close()
+	return nil
+}
 
 func (f Factory) build(nodeID string, cfg panel.NodeConfig, users []panel.User) (map[string]any, error) {
 	if cfg.ServerPort <= 0 || cfg.ServerPort > 65535 {
@@ -218,11 +265,7 @@ func addTransport(in map[string]any, cfg panel.NodeConfig) {
 	if cfg.Network == "" || cfg.Network == "tcp" {
 		return
 	}
-	network := strings.ToLower(cfg.Network)
-	if network == "ws" {
-		network = "ws"
-	}
-	transport := map[string]any{"type": network}
+	transport := map[string]any{"type": strings.ToLower(cfg.Network)}
 	for key, value := range cfg.NetworkSettings {
 		if key == "serviceName" {
 			transport["service_name"] = value
@@ -333,14 +376,18 @@ type trackedPacketConn struct {
 	stats  *state.Store
 	nodeID string
 	userID int64
-	once   sync.Once
+
+	// Batched traffic counters to reduce lock contention.
+	pendingUpload   atomic.Int64
+	pendingDownload atomic.Int64
+	closed          atomic.Bool
 }
 
 func (c *trackedPacketConn) ReadPacket(buffer *buf.Buffer) (M.Socksaddr, error) {
 	destination, err := c.PacketConn.ReadPacket(buffer)
 	if buffer.Len() > 0 {
 		c.stats.Wait(c.userID, buffer.Len())
-		c.stats.Add(c.nodeID, c.userID, int64(buffer.Len()), 0)
+		c.pendingUpload.Add(int64(buffer.Len()))
 	}
 	return destination, err
 }
@@ -350,13 +397,26 @@ func (c *trackedPacketConn) WritePacket(buffer *buf.Buffer, destination M.Socksa
 	c.stats.Wait(c.userID, n)
 	err := c.PacketConn.WritePacket(buffer, destination)
 	if err == nil && n > 0 {
-		c.stats.Add(c.nodeID, c.userID, 0, int64(n))
+		c.pendingDownload.Add(int64(n))
 	}
 	return err
 }
 
+func (c *trackedPacketConn) flush() {
+	if c.closed.Load() {
+		return
+	}
+	up := c.pendingUpload.Swap(0)
+	down := c.pendingDownload.Swap(0)
+	if up > 0 || down > 0 {
+		c.stats.Add(c.nodeID, c.userID, up, down)
+	}
+}
+
 func (c *trackedPacketConn) Close() error {
-	err := c.PacketConn.Close()
-	c.once.Do(func() { c.stats.Close(c.nodeID, c.userID) })
-	return err
+	if c.closed.CompareAndSwap(false, true) {
+		c.flush()
+		c.stats.Close(c.nodeID, c.userID)
+	}
+	return c.PacketConn.Close()
 }

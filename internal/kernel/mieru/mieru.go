@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	apicommon "github.com/enfein/mieru/v3/apis/common"
 	"github.com/enfein/mieru/v3/apis/constant"
@@ -102,6 +103,7 @@ func (r *Runtime) Close() error {
 
 func (r *Runtime) accept() {
 	defer r.wg.Done()
+	var consecutiveErrors int
 	for {
 		conn, req, err := r.server.Accept()
 		if err != nil {
@@ -109,9 +111,15 @@ func (r *Runtime) accept() {
 			case <-r.stop:
 				return
 			default:
+				consecutiveErrors++
+				if consecutiveErrors > 10 {
+					// Backoff on persistent errors to avoid CPU spin.
+					time.Sleep(time.Duration(min(consecutiveErrors, 100)) * 10 * time.Millisecond)
+				}
 				continue
 			}
 		}
+		consecutiveErrors = 0
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()

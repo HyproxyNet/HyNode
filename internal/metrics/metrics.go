@@ -87,8 +87,13 @@ func (s *SpeedSnapshot) update(inBytes, outBytes uint64) (inSpeed, outSpeed floa
 
 	elapsed := now.Sub(s.lastTime).Seconds()
 	if elapsed > 0 {
-		inSpeed = float64(inBytes-s.lastIn) / elapsed
-		outSpeed = float64(outBytes-s.lastOut) / elapsed
+		// Guard against counter wraparound (reset or 32-bit overflow).
+		if inBytes >= s.lastIn {
+			inSpeed = float64(inBytes-s.lastIn) / elapsed
+		}
+		if outBytes >= s.lastOut {
+			outSpeed = float64(outBytes-s.lastOut) / elapsed
+		}
 	}
 
 	s.lastIn = inBytes

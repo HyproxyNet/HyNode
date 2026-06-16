@@ -1,8 +1,9 @@
 package certificate
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -182,7 +183,7 @@ func generateSelfSigned(dir, serverName string) (Material, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return Material{}, err
 	}
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return Material{}, err
 	}
@@ -196,7 +197,7 @@ func generateSelfSigned(dir, serverName string) (Material, error) {
 		DNSNames:     []string{serverName},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour), // 10 years, matching admin description
-		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -204,7 +205,11 @@ func generateSelfSigned(dir, serverName string) (Material, error) {
 		return Material{}, err
 	}
 	certBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	keyBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	keyDer, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return Material{}, err
+	}
+	keyBytes := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDer})
 	if err = os.WriteFile(certPath, certBytes, 0o600); err != nil {
 		return Material{}, err
 	}

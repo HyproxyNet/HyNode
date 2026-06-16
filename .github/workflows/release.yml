@@ -41,6 +41,7 @@ jobs:
             -o hynode \
             ./cmd/hynode
           tar czf hynode-${{ matrix.suffix }}.tar.gz hynode
+          sha256sum hynode-${{ matrix.suffix }}.tar.gz > hynode-${{ matrix.suffix }}.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

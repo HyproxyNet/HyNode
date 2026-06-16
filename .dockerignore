@@ -1,0 +1,12 @@
+.git
+.github
+build
+data
+scripts
+deploy
+docs
+README.md
+LICENSE
+.gitignore
+.dockerignore
+*.md

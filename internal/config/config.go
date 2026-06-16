@@ -99,7 +99,7 @@ func Load(path string) (Config, []string, error) {
 		}
 		cfg.Sync.ReportInterval = d
 	}
-	validationErr, warnings := cfg.Validate()
+	warnings, validationErr := cfg.Validate()
 	if validationErr != nil {
 		return cfg, nil, validationErr
 	}
@@ -127,14 +127,14 @@ func applyEnvironment(cfg *Config) {
 }
 
 // Validate checks the configuration for errors. It returns warnings (non-fatal)
-// as the second return value.
-func (c Config) Validate() (error, []string) {
+// and an error (fatal).
+func (c Config) Validate() ([]string, error) {
 	var warnings []string
 	if !strings.HasPrefix(c.Panel.URL, "http://") && !strings.HasPrefix(c.Panel.URL, "https://") {
-		return errors.New("panel.url must start with http:// or https://"), nil
+		return nil, errors.New("panel.url must start with http:// or https://")
 	}
 	if c.Panel.Token == "" {
-		return errors.New("panel.token is required"), nil
+		return nil, errors.New("panel.token is required")
 	}
 	seen := map[string]bool{}
 	var enabled int
@@ -144,23 +144,23 @@ func (c Config) Validate() (error, []string) {
 		}
 		enabled++
 		if node.ID == "" {
-			return errors.New("enabled node id is required"), nil
+			return nil, errors.New("enabled node id is required")
 		}
 		if isNumeric(node.ID) {
 			warnings = append(warnings, fmt.Sprintf("node %q uses a numeric id; consider using the node's custom code for unambiguous panel resolution", node.ID))
 		}
 		if seen[node.ID] {
-			return fmt.Errorf("duplicate node id %q", node.ID), nil
+			return nil, fmt.Errorf("duplicate node id %q", node.ID)
 		}
 		seen[node.ID] = true
 	}
 	if enabled == 0 {
-		return errors.New("at least one enabled node is required"), nil
+		return nil, errors.New("at least one enabled node is required")
 	}
 	if c.Sync.PullInterval < 0 || c.Sync.ReportInterval < 0 {
-		return errors.New("sync intervals must not be negative"), nil
+		return nil, errors.New("sync intervals must not be negative")
 	}
-	return nil, warnings
+	return warnings, nil
 }
 
 func isNumeric(s string) bool {

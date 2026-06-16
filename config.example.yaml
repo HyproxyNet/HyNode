@@ -8,10 +8,13 @@ nodes:
 
 runtime:
   data_dir: "/var/lib/hynode"
-  log_level: "info"
+  log_level: "info"        # info | debug
   health_listen: "127.0.0.1:9090"
 
-sync: {}
+# Sync intervals (optional, defaults to panel's push_interval/pull_interval)
+# sync:
+#   pull_interval: "60s"
+#   report_interval: "60s"
 
 certificate_fallback:
-  cert_mode: "none"
+  cert_mode: "none"        # none | self-signed | http-01 | dns-01 | content | file
