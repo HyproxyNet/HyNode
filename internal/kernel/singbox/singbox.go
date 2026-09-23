@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -222,16 +223,11 @@ func (f Factory) inbound(nodeID string, cfg panel.NodeConfig, users []panel.User
 	}
 	if requiresTLS(protocol, cfg) {
 		if cfg.TLS == 2 {
-			reality := cloneMap(cfg.TLSSettings)
-			if value, ok := reality["private_key"].(string); !ok || value == "" {
-				return nil, errors.New("reality TLS requires tls_settings.private_key for the inbound")
+			tls, err := buildRealityInboundTLS(cfg.TLSSettings)
+			if err != nil {
+				return nil, err
 			}
-			reality["enabled"] = true
-			in["tls"] = map[string]any{
-				"enabled":     true,
-				"server_name": cfg.ServerName,
-				"reality":     reality,
-			}
+			in["tls"] = tls
 			return in, nil
 		}
 		material, err := certificate.Resolve(cfg.CertConfig, f.Fallback, f.DataDir, nodeID, cfg.ServerName)
@@ -317,6 +313,89 @@ func compilePanelRoutes(routes []panel.Route) ([]any, error) {
 
 func requiresTLS(protocol string, cfg panel.NodeConfig) bool {
 	return cfg.TLS > 0 || protocol == "trojan" || protocol == "hysteria" || protocol == "hysteria2" || protocol == "tuic" || protocol == "anytls" || protocol == "naive"
+}
+
+func buildRealityInboundTLS(settings map[string]any) (map[string]any, error) {
+	serverName := strings.TrimSpace(stringSetting(settings, "server_name"))
+	if serverName == "" {
+		return nil, errors.New("reality TLS requires tls_settings.server_name for the inbound")
+	}
+	privateKey := strings.TrimSpace(stringSetting(settings, "private_key"))
+	if privateKey == "" {
+		return nil, errors.New("reality TLS requires tls_settings.private_key for the inbound")
+	}
+	serverPort, err := realityServerPort(settings["server_port"])
+	if err != nil {
+		return nil, err
+	}
+
+	reality := map[string]any{
+		"enabled": true,
+		"handshake": map[string]any{
+			"server":      serverName,
+			"server_port": serverPort,
+		},
+		"private_key": privateKey,
+	}
+	if shortID := strings.TrimSpace(stringSetting(settings, "short_id")); shortID != "" {
+		reality["short_id"] = shortID
+	}
+
+	return map[string]any{
+		"enabled":     true,
+		"server_name": serverName,
+		"reality":     reality,
+	}, nil
+}
+
+func stringSetting(settings map[string]any, key string) string {
+	if settings == nil {
+		return ""
+	}
+	value, ok := settings[key].(string)
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func realityServerPort(value any) (int, error) {
+	switch v := value.(type) {
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" {
+			return 0, errors.New("reality TLS requires tls_settings.server_port for the inbound")
+		}
+		port, err := strconv.Atoi(text)
+		if err != nil {
+			return 0, fmt.Errorf("reality TLS tls_settings.server_port must be a valid port: %w", err)
+		}
+		return validateRealityServerPort(port)
+	case int:
+		return validateRealityServerPort(v)
+	case int64:
+		if v < 1 || v > 65535 {
+			return 0, fmt.Errorf("reality TLS tls_settings.server_port out of range: %d", v)
+		}
+		return int(v), nil
+	case float64:
+		if math.Trunc(v) != v {
+			return 0, fmt.Errorf("reality TLS tls_settings.server_port must be an integer: %v", v)
+		}
+		if v < 1 || v > 65535 {
+			return 0, fmt.Errorf("reality TLS tls_settings.server_port out of range: %v", v)
+		}
+		return int(v), nil
+	default:
+		return 0, errors.New("reality TLS requires tls_settings.server_port for the inbound")
+	}
+}
+
+func validateRealityServerPort(port int) (int, error) {
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("reality TLS tls_settings.server_port out of range: %d", port)
+	}
+	return port, nil
 }
 
 func cloneMap(input map[string]any) map[string]any {
