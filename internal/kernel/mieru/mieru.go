@@ -251,7 +251,7 @@ func (r *Runtime) handleUDP(proxyConn net.Conn) {
 	if response.WriteToSocks5(proxyConn) != nil {
 		return
 	}
-	socks5.RunUDPAssociateLoop(udpConn, apicommon.NewPacketOverStreamTunnel(proxyConn), &net.Resolver{})
+	_ = socks5.RunUDPAssociateLoop(udpConn, apicommon.NewPacketOverStreamTunnel(proxyConn), &net.Resolver{})
 }
 
 func copyBoth(left, right net.Conn) {

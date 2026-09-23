@@ -398,14 +398,6 @@ func validateRealityServerPort(port int) (int, error) {
 	return port, nil
 }
 
-func cloneMap(input map[string]any) map[string]any {
-	result := make(map[string]any, len(input))
-	for key, value := range input {
-		result[key] = value
-	}
-	return result
-}
-
 func passwordUsers(users []panel.User) []map[string]any {
 	return mapUsers(users, func(u panel.User) map[string]any {
 		return map[string]any{"name": strconv.FormatInt(u.ID, 10), "password": u.UUID}
