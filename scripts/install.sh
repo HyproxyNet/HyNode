@@ -430,6 +430,34 @@ show_summary() {
     echo ""
 }
 
+restart_after_update() {
+    info "检测到 HyNode 已安装且正在运行，正在重启服务以加载新版本..."
+    if systemctl restart "${SERVICE_NAME}"; then
+        sleep 2
+        if systemctl is-active --quiet "${SERVICE_NAME}"; then
+            ok "HyNode 已更新并重启"
+            return 0
+        fi
+    fi
+
+    err "新版本启动失败"
+    if [[ -f "${BINARY}.bak" ]]; then
+        warn "正在恢复旧版本 binary 并重启..."
+        cp "${BINARY}.bak" "${BINARY}"
+        chmod +x "${BINARY}"
+        if systemctl restart "${SERVICE_NAME}"; then
+            sleep 2
+            if systemctl is-active --quiet "${SERVICE_NAME}"; then
+                ok "已回滚到旧版本并恢复运行"
+                return 0
+            fi
+        fi
+    fi
+
+    warn "请查看日志: journalctl -u hynode -e"
+    return 1
+}
+
 # ─── Main ───────────────────────────────────────────────────────────────
 main() {
     parse_args "$@"
@@ -442,6 +470,12 @@ main() {
     check_root
     detect_arch
     detect_os
+
+    local was_installed=false
+    local was_running=false
+    [[ -f "${BINARY}" ]] && was_installed=true
+    systemctl is-active --quiet "${SERVICE_NAME}" 2>/dev/null && was_running=true
+
     install_deps
     install_binary "$ARG_VERSION"
     install_service
@@ -486,6 +520,10 @@ main() {
                     ;;
             esac
         fi
+    elif [[ "$was_installed" == true ]] && [[ "$was_running" == true ]]; then
+        restart_after_update
+    elif [[ "$was_installed" == true ]]; then
+        info "HyNode 已更新；服务原本未运行，未自动启动"
     fi
 }
 

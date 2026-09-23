@@ -315,25 +315,25 @@ do_update() {
 
     info "检查更新..."
 
-    local latest
-    latest=$(get_latest_version)
-    if [[ -z "$latest" ]]; then
-        err "获取版本号失败，请检查网络"
-        return 1
-    fi
-
     local current
     current=$(get_current_version)
     echo -e "  当前版本: ${current}"
-    echo -e "  最新版本: ${latest}"
 
-    # If specific version requested
+    local latest
     if [[ -n "$target_version" ]]; then
         latest="$target_version"
         info "目标版本: ${latest}"
-    elif [[ "$current" == "$latest" ]]; then
-        ok "已是最新版本"
-        return
+    else
+        latest=$(get_latest_version)
+        if [[ -z "$latest" ]]; then
+            err "获取版本号失败，请检查网络"
+            return 1
+        fi
+        echo -e "  最新版本: ${latest}"
+        if [[ "$current" == "$latest" ]]; then
+            ok "已是最新版本"
+            return
+        fi
     fi
 
     echo ""

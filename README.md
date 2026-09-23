@@ -48,6 +48,15 @@ bash <(curl -fsSL ...) \
 | `--data-dir` | 数据目录 (默认 `/var/lib/hynode`) |
 | `--listen` | 健康检查监听地址 (默认 `127.0.0.1:9090`) |
 
+已安装机器可重跑安装脚本更新到最新 Release；已有 `/etc/hynode/config.yaml` 会保留，不会因为传入 `--url`、`--token`、`--nodes` 被覆盖。若服务更新前正在运行，脚本会在安装新版 binary 后自动重启服务；若服务原本停止，则保持停止。
+
+也可以通过管理脚本更新：
+
+```bash
+hynode-cli update           # 更新到最新版本
+hynode-cli update v1.2.0    # 更新到指定版本
+```
+
 ## 管理脚本 (hynode-cli)
 
 安装后使用 `hynode-cli` 管理节点：
