@@ -19,16 +19,16 @@ jobs:
           go-version: '1.24.7'
 
       - name: Vet
-        run: go vet -tags "with_quic with_acme" ./...
+        run: go vet -tags "with_quic with_acme with_utls" ./...
 
       - name: Test
-        run: go test -race -tags "with_quic with_acme" ./...
+        run: go test -race -tags "with_quic with_acme with_utls" ./...
 
       - name: Lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --build-tags "with_quic with_acme"
+          args: --build-tags "with_quic with_acme with_utls"
 
   build:
     needs: ci
@@ -58,7 +58,7 @@ jobs:
           GOARM: "7"
         run: |
           go build -trimpath \
-            -tags "with_quic with_acme" \
+            -tags "with_quic with_acme with_utls" \
             -ldflags="-s -w -X main.version=${{ github.ref_name }} -X main.commit=$(git rev-parse --short HEAD) -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o hynode \
             ./cmd/hynode

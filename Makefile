@@ -4,7 +4,7 @@
 APP_NAME    := hynode
 MODULE      := ./cmd/hynode
 BUILD_DIR   := build
-BUILD_TAGS  := with_quic with_acme
+BUILD_TAGS  := with_quic with_acme with_utls
 GOPROXY     := https://goproxy.cn,direct
 GOSUMDB     := off
 GOTOOLCHAIN := go1.24.7
