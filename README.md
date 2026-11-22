@@ -1,6 +1,6 @@
 # HyNode
 
-HyNode 是 [HyBoard](https://github.com/HyproxyNet/HyBoard) 的高性能 Go 节点后端。它对接 HyBoard v2 REST API，嵌入 [sing-box](https://github.com/SagerNet/sing-box) 与 [mieru](https://github.com/enfein/mieru) 作为协议内核。
+HyNode 是 [HyBoard](https://github.com/HyproxyNet/HyBoard) 的高性能 Go 节点后端。它对接 HyBoard v2 REST API，嵌入 [Xray-core](https://github.com/XTLS/Xray-core)、[sing-box](https://github.com/SagerNet/sing-box) 与 [mieru](https://github.com/enfein/mieru) 作为协议内核。
 
 ## 功能特性
 
@@ -8,16 +8,17 @@ HyNode 是 [HyBoard](https://github.com/HyproxyNet/HyBoard) 的高性能 Go 节�
 - 单进程承载多个 HyBoard 节点，共享设备限制状态。
 - 按节点上报流量、在线 IP、连接数、系统指标。
 - 进程级设备/IP 限制与按用户带宽限速。
-- 嵌入式 sing-box 支持：Shadowsocks、VMess、VLESS、Trojan、Hysteria v1/v2、TUIC、AnyTLS、SOCKS、Naive、HTTP。
+- **Xray 内核**（优先）：Shadowsocks、VMess、VLESS、Trojan、SOCKS、HTTP，含 **XHTTP**、**REALITY**、**xtls-rprx-vision**。
+- **sing-box 内核**（回退）：Hysteria v1/v2、TUIC、AnyTLS、Naive，以及 Xray 不支持的传输（如 h2、SS plugin）。
 - Mieru TCP/UDP 适配器，使用官方嵌入式 API。
-- 证书模式：self-signed、http-01、dns-01（Cloudflare、AliDNS）、content、file。
-- 面板下发的 multiplex、transport、routes、custom_outbounds 透传至 sing-box。
+- 证书模式：self-signed、http-01、dns-01（Cloudflare、AliDNS）、content、file（Xray 内核需 file/content）。
+- 面板下发的 multiplex、transport、routes、custom_outbounds 透传至对应内核。
 - **分片锁架构**：64 分片用户状态锁，高并发下锁争用降低 ~64 倍。
 - **批量流量统计**：共享后台 flusher 替代逐连接 goroutine，大幅减少高并发场景下的 goroutine 开销。
 - **用户热重载**：仅用户列表变化时无需重建运行时，避免断流。
 - **BBR 拥塞控制**：脚本内置 BBR 一键配置 + 全面网络性能优化参数。
 - **断流优化**：热重载时短暂排空旧实例，减少连接重置。
-- **上游同步**：同步 sing-box 最新核心修复，包括 UoT 竞态修复、TLS 关闭修复、H3 连接泄漏修复等。
+- **上游同步**：同步 Xray-core / sing-box 最新核心修复。
 
 ## 一键安装
 
@@ -216,12 +217,15 @@ docker run -d --name hynode --restart unless-stopped \
 
 ## 协议边界
 
+- 协议路由：`mieru` → mieru；Xray 支持的协议/传输 → **Xray 内核**；其余（hysteria/tuic/anytls/naive、h2、SS plugin 等）→ **sing-box 内核**。
 - 面板下发的 `multiplex` 设置会透传给支持该功能的 sing-box 入站协议。
-- `shadowsocks` 的 `plugin`/`plugin_opts` 会被拒绝。
+- `shadowsocks` 的 `plugin`/`plugin_opts` 会被拒绝（两内核均不支持）。
 - `vless` 的非 `none` `decryption` 会被拒绝。
 - `tuic` v4 token 认证会被拒绝。
 - Mieru 仅接受 `direct` 和 `block` 路由，拒绝 `proxy` 路由和自定义出站。
-- 设备限制在同一 HyNode 进程内跨节点严格执行。
+- Xray 内核的 REALITY/TLS 需要 `file` 或 `content` 证书模式（不支持 ACME provider 透传）。
+- Xray 内核无入站连接钩子：流量经 stats 计数器轮询入账，在线 IP 由 online map 同步；设备/IP 限制在 Xray 路径上仅做上报，不在握手时拒绝。
+- 设备限制在同一 HyNode 进程内跨节点严格执行（sing-box / mieru 路径）。
 - 仅配置变更时全量重建运行时；仅用户变更时热重载，避免断流。
 - 关闭时发送最后一次流量报告。
 
@@ -235,7 +239,7 @@ docker run -d --name hynode --restart unless-stopped \
 
 ### 断流优化
 
-- 用户列表变更时，通过 `HotReloader` 接口重建 sing-box 实例，旧实例短暂排空后关闭，减少连接重置。
+- 用户列表变更时，通过 `HotReloader` 接口重建当前内核实例（Xray / sing-box），旧实例短暂排空后关闭，减少连接重置。
 - 仅面板配置 (端口/协议/TLS) 变更时才执行全量重启。
 - 优雅关闭时发送最终流量报告，确保数据不丢失。
 

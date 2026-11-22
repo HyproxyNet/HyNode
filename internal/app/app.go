@@ -16,6 +16,7 @@ import (
 	"hynode/internal/kernel"
 	mierukernel "hynode/internal/kernel/mieru"
 	singkernel "hynode/internal/kernel/singbox"
+	xraykernel "hynode/internal/kernel/xray"
 	appmetrics "hynode/internal/metrics"
 	"hynode/internal/panel"
 	"hynode/internal/state"
@@ -229,6 +230,15 @@ func toMap(v any, log *slog.Logger, label string) map[string]any {
 func (a *App) createRuntime(nodeID string, cfg panel.NodeConfig, users []panel.User) (kernel.Runtime, error) {
 	if cfg.Protocol == "mieru" {
 		return mierukernel.Factory{}.New(nodeID, cfg, users, a.stats)
+	}
+	// Prefer Xray for protocols/transports it implements natively (XHTTP,
+	// REALITY, Vision, …). Fall back to sing-box for Hysteria/TUIC/AnyTLS/Naive
+	// and anything else Xray does not support.
+	if xraykernel.Supported(cfg) {
+		return xraykernel.Factory{
+			DataDir:  a.config.Runtime.DataDir,
+			Fallback: a.config.CertificateFallback,
+		}.New(nodeID, cfg, users, a.stats)
 	}
 	return singkernel.Factory{
 		DataDir:  a.config.Runtime.DataDir,

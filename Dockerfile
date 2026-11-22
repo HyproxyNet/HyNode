@@ -1,6 +1,6 @@
 # Build context is the HyNode directory:
 # docker build -t hynode:latest .
-FROM golang:1.24.7-bookworm AS build
+FROM golang:1.27.0-bookworm AS build
 ARG GOPROXY=https://goproxy.cn,direct
 WORKDIR /src
 COPY go.mod go.sum ./

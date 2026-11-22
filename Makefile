@@ -7,7 +7,7 @@ BUILD_DIR   := build
 BUILD_TAGS  := with_quic with_acme with_utls
 GOPROXY     := https://goproxy.cn,direct
 GOSUMDB     := off
-GOTOOLCHAIN := go1.24.7
+GOTOOLCHAIN := go1.27.0
 
 # Version info (auto-detected from git)
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)

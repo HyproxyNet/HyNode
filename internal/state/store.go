@@ -32,8 +32,8 @@ type Store struct {
 	shards [shardCount]shard
 
 	// bySecret maps UUID -> user ID. Protected by its own lock.
-	secretMu   sync.RWMutex
-	bySecret   map[string]int64
+	secretMu sync.RWMutex
+	bySecret map[string]int64
 
 	// usage tracks per-node, per-user traffic. Protected by usageMu.
 	usageMu sync.RWMutex
@@ -60,6 +60,9 @@ type usageState struct {
 	upload   int64
 	download int64
 	active   int
+	// externalOnline is set by kernels that cannot wrap connections
+	// (e.g. embedded Xray). Snapshot.Online uses max(active, externalOnline).
+	externalOnline int
 }
 
 type Snapshot struct {
@@ -184,6 +187,37 @@ func (s *Store) Add(nodeID string, userID, upload, download int64) {
 	s.usageMu.Unlock()
 }
 
+// SyncAlive replaces the alive IP set for a user and reports online count.
+// Used by kernels that only expose aggregated online-IP maps (embedded Xray)
+// instead of per-connection Open/Close hooks. Does not enforce device limits;
+// callers should reject over-limit IPs before calling this when possible.
+func (s *Store) SyncAlive(nodeID string, userID int64, ips []string) {
+	sh := s.getShard(userID)
+	sh.mu.Lock()
+	current := sh.users[userID]
+	if current == nil {
+		sh.mu.Unlock()
+		return
+	}
+	now := time.Now()
+	// Replace rather than merge so departed IPs age out of Alive immediately.
+	current.ips = make(map[string]time.Time, len(ips))
+	alive := 0
+	for _, ip := range ips {
+		if ip == "" {
+			continue
+		}
+		current.ips[ip] = now
+		alive++
+	}
+	sh.mu.Unlock()
+
+	s.usageMu.Lock()
+	usage := s.nodeUsageLocked(nodeID, userID)
+	usage.externalOnline = alive
+	s.usageMu.Unlock()
+}
+
 func (s *Store) Wait(userID int64, n int) {
 	sh := s.getShard(userID)
 	sh.mu.RLock()
@@ -243,8 +277,12 @@ func (s *Store) Snapshot(nodeID string) Snapshot {
 		if usage.upload > 0 || usage.download > 0 {
 			result.Traffic[key] = [2]int64{usage.upload, usage.download}
 		}
-		if usage.active > 0 {
-			result.Online[key] = usage.active
+		online := usage.active
+		if usage.externalOnline > online {
+			online = usage.externalOnline
+		}
+		if online > 0 {
+			result.Online[key] = online
 		}
 	}
 	s.usageMu.RUnlock()
@@ -267,6 +305,7 @@ func (s *Store) Commit(nodeID string, snapshot Snapshot) {
 		}
 		usage.upload -= min(usage.upload, value[0])
 		usage.download -= min(usage.download, value[1])
+		// externalOnline is a live gauge from the kernel, not a pending counter.
 	}
 }
 
