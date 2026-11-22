@@ -140,7 +140,7 @@ func (r *Runtime) handle(proxyConn net.Conn, req *model.Request) {
 		return
 	}
 	conn := state.WrapConn(proxyConn, r.stats, r.nodeID, userID)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	switch req.Command {
 	case constant.Socks5ConnectCmd:
 		if r.blocked(req.DstAddr) {
@@ -215,7 +215,7 @@ func (r *Runtime) handleTCP(proxyConn net.Conn, req *model.Request) {
 	if err != nil {
 		return
 	}
-	defer target.Close()
+	defer func() { _ = target.Close() }()
 	local, _ := target.LocalAddr().(*net.TCPAddr)
 	if local == nil {
 		return
@@ -235,7 +235,7 @@ func (r *Runtime) handleUDP(proxyConn net.Conn) {
 	if err != nil {
 		return
 	}
-	defer udpConn.Close()
+	defer func() { _ = udpConn.Close() }()
 	_, port, err := net.SplitHostPort(udpConn.LocalAddr().String())
 	if err != nil {
 		return

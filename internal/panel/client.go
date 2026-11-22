@@ -72,7 +72,7 @@ func (c *Client) Report(ctx context.Context, nodeID, nodeType string, report Rep
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return responseError(resp)
 	}
@@ -91,7 +91,7 @@ func (c *Client) get(ctx context.Context, nodeID, nodeType, path, etag string, t
 	if err != nil {
 		return etag, false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	next := resp.Header.Get("ETag")
 	if next == "" {
 		next = etag

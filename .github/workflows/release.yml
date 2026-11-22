@@ -25,9 +25,9 @@ jobs:
         run: go test -race -tags "with_quic with_acme with_utls" ./...
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.15.0
           args: --build-tags "with_quic with_acme with_utls"
 
   build:
