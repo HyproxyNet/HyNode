@@ -197,8 +197,12 @@ func (r *Runtime) ReloadUsers(users []panel.User) error {
 func (r *Runtime) buildInstance(users []panel.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	_, err := r.buildInstanceLocked(users)
-	return err
+	inst, err := r.buildInstanceLocked(users)
+	if err != nil {
+		return err
+	}
+	r.instance = inst
+	return nil
 }
 
 func (r *Runtime) buildInstanceLocked(users []panel.User) (*core.Instance, error) {

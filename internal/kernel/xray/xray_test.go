@@ -1,8 +1,11 @@
 package xray
 
 import (
+	"context"
+	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"hynode/internal/panel"
 	"hynode/internal/state"
@@ -191,4 +194,63 @@ func TestReloadUsersKeepsProtocol(t *testing.T) {
 	if err := rt.ReloadUsers([]panel.User{{ID: 1, UUID: "pw2"}, {ID: 2, UUID: "pw3"}}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Regression: buildInstance must assign r.instance so Start() can run the
+// Xray core; a missing assignment made every node fail with "xray runtime
+// not built" and never listen.
+func TestStartServesAfterNew(t *testing.T) {
+	rt, err := (Factory{DataDir: t.TempDir()}).New("n", panel.NodeConfig{
+		Protocol:   "socks",
+		ListenIP:   "127.0.0.1",
+		ServerPort: 18446,
+	}, []panel.User{{ID: 1, UUID: "pw1"}}, state.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The listener must actually be up: a plain TCP connect should succeed.
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:18446", 2*time.Second)
+	if err != nil {
+		t.Fatalf("socks inbound not listening after Start: %v", err)
+	}
+	_ = conn.Close()
+}
+
+func TestStartServesXHTTPReality(t *testing.T) {
+	rt, err := (Factory{DataDir: t.TempDir()}).New("n", panel.NodeConfig{
+		Protocol:   "vless",
+		ListenIP:   "127.0.0.1",
+		ServerPort: 18447,
+		Network:    "xhttp",
+		TLS:        2,
+		Flow:       "xtls-rprx-vision",
+		NetworkSettings: map[string]any{
+			"path": "/t",
+			"mode": "auto",
+		},
+		TLSSettings: map[string]any{
+			"server_name": "www.example.com",
+			"server_port": "443",
+			// 43-char base64url string decoding to exactly 32 bytes, the
+			// format REALITYConfig.Build() validates on Start().
+			"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+			"short_id":    "01234567",
+		},
+	}, []panel.User{{ID: 1, UUID: "3c8a1f0e-0000-4000-8000-000000000001"}}, state.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rt.Close() }()
+	if err := rt.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:18447", 2*time.Second)
+	if err != nil {
+		t.Fatalf("xhttp inbound not listening after Start: %v", err)
+	}
+	_ = conn.Close()
 }
